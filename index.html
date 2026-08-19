@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Papan Pengumuman - Pembangunan MZAK Hari Ini</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS untuk Export Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Firebase App & Realtime Database SDK (Modular v10) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // Konfigurasi Firebase Anda
+        const firebaseConfig = {
+            apiKey: "AIzaSyAekeW1l0cB2-COYH4BpM16rsq86a8_nMg",
+            authDomain: "jono-513.firebaseapp.com",
+            databaseURL: "https://jono-513-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "jono-513",
+            storageBucket: "jono-513.firebasestorage.app",
+            messagingSenderId: "427544963058",
+            appId: "1:427544963058:web:f1972780cfbbec4ce32d6b",
+            measurementId: "G-MF4H63ZJZ7"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        let isEditMode = false;
+        let isRemoteUpdate = false;
+        let saveTimeout = null;
+
+        // Tanggal dan Jam Otomatis
+        function updateDateTime() {
+            const now = new Date();
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+            const dtEl = document.getElementById('datetime');
+            if(dtEl) dtEl.innerText = now.toLocaleDateString('id-ID', options) + " WIB";
+        }
+        setInterval(updateDateTime, 1000);
+        updateDateTime();
+
+        // Hitung Otomatis Total
+        window.calculateTotals = function() {
+            const tbody = document.getElementById('table-orang').getElementsByTagName('tbody')[0];
+            let totalPagi = 0, totalSiang = 0, totalSore = 0;
+
+            for (let i = 0; i < tbody.rows.length; i++) {
+                const inputs = tbody.rows[i].getElementsByTagName('input');
+                if (inputs.length >= 4) {
+                    totalPagi += Number(inputs[1].value) || 0;
+                    totalSiang += Number(inputs[2].value) || 0;
+                    totalSore += Number(inputs[3].value) || 0;
+                }
+            }
+
+            document.getElementById('total-pagi').innerText = totalPagi;
+            document.getElementById('total-siang').innerText = totalSiang;
+            document.getElementById('total-sore').innerText = totalSore;
+        }
+
+        // SIMPAN KE FIREBASE DENGAN DEBOUNCE
+        window.saveAllData = function() {
+            if (isRemoteUpdate) return;
+            
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                const tables = ['table-orang', 'table-panitia', 'table-pekerjaan', 'table-informasi'];
+                const dataToSave = {};
+
+                tables.forEach(tableId => {
+                    const tableEl = document.getElementById(tableId);
+                    if (!tableEl) return;
+                    const tbody = tableEl.getElementsByTagName('tbody')[0];
+                    let rowsContent = [];
+                    for (let i = 0; i < tbody.rows.length; i++) {
+                        let rowInputs = [];
+                        let inputs = tbody.rows[i].getElementsByTagName('input');
+                        for (let j = 0; j < inputs.length; j++) {
+                            rowInputs.push(inputs[j].value);
+                        }
+                        rowsContent.push(rowInputs);
+                    }
+                    dataToSave[tableId] = rowsContent;
+                });
+
+                set(ref(db, 'mzak_app_data'), dataToSave).catch((error) => {
+                    console.error("Gagal menyimpan ke Firebase: ", error);
+                });
+            }, 300);
+        }
+
+        // AMBIL DATA REAL-TIME
+        function listenRealtimeData() {
+            const dataRef = ref(db, 'mzak_app_data');
+            onValue(dataRef, (snapshot) => {
+                const parsedData = snapshot.val();
+                if (!parsedData) return;
+
+                isRemoteUpdate = true;
+                Object.keys(parsedData).forEach(tableId => {
+                    const tableElement = document.getElementById(tableId);
+                    if (!tableElement) return;
+                    const tbody = tableElement.getElementsByTagName('tbody')[0];
+                    tbody.innerHTML = ""; 
+
+                    parsedData[tableId].forEach((rowValues, index) => {
+                        const rowCount = index + 1;
+                        let newRow = tbody.insertRow();
+                        let newRowHTML = `<td class="text-center font-mono row-num font-bold">${rowCount}</td>`;
+
+                        if (tableId === 'table-orang') {
+                            newRowHTML += `
+                                <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" value="${rowValues[0] || ''}" onfocus="scrollToInput(this)" oninput="calculateTotals(); saveAllData();"></td>
+                                <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="${rowValues[1] || 0}" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; calculateTotals(); saveAllData();"></td>
+                                <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="${rowValues[2] || 0}" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; calculateTotals(); saveAllData();"></td>
+                                <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="${rowValues[3] || 0}" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; calculateTotals(); saveAllData();"></td>
+                            `;
+                        } else if (tableId === 'table-panitia') {
+                            newRowHTML += `
+                                <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" value="${rowValues[0] || ''}" onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                                <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" value="${rowValues[1] || ''}" onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                            `;
+                        } else if (tableId === 'table-pekerjaan') {
+                            newRowHTML += `
+                                <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" value="${rowValues[0] || ''}" onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                                <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" value="${rowValues[1] || ''}" onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                                <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="${rowValues[2] || 0}" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; saveAllData();"></td>
+                            `;
+                        } else if (tableId === 'table-informasi') {
+                            newRowHTML += `
+                                <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" value="${rowValues[0] || ''}" onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                                <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" value="${rowValues[1] || ''}" onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                            `;
+                        }
+
+                        newRowHTML += `<td class="text-center delete-row-btn"><button onclick="deleteRow(this)" class="text-red-400 hover:text-red-300 font-bold text-xl px-1">×</button></td>`;
+                        newRow.innerHTML = newRowHTML;
+                    });
+                });
+
+                window.calculateTotals();
+                setTimeout(() => { isRemoteUpdate = false; }, 200);
+            });
+        }
+
+        // FUNGSI AUTO-SCROLL STABIL AGAR KEYBOARD TIDAK TERTUTUP
+        window.scrollToInput = function(element) {
+            setTimeout(() => {
+                element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 100);
+        }
+
+        window.onload = function() {
+            listenRealtimeData();
+            const savedTheme = localStorage.getItem('mzak_theme') || 'theme-dark-gradient';
+            setTheme(savedTheme);
+        };
+
+        // GANTI TEMA
+        window.setTheme = function(themeName) {
+            document.body.className = `min-h-screen p-3 flex flex-col gap-3 view-mode ${themeName}`;
+            localStorage.setItem('mzak_theme', themeName);
+        }
+
+        window.addRow = function(tableId) {
+            if (!isEditMode) return;
+            const tableElement = document.getElementById(tableId);
+            const tbody = tableElement.getElementsByTagName('tbody')[0];
+            const rowCount = tbody.rows.length + 1;
+            let newRowHTML = '';
+
+            if (tableId === 'table-orang') {
+                newRowHTML = `
+                    <td class="text-center font-mono row-num font-bold">${rowCount}</td>
+                    <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" placeholder="Unsur..." onfocus="scrollToInput(this)" oninput="calculateTotals(); saveAllData();"></td>
+                    <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="0" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; calculateTotals(); saveAllData();"></td>
+                    <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="0" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; calculateTotals(); saveAllData();"></td>
+                    <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="0" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; calculateTotals(); saveAllData();"></td>
+                    <td class="text-center delete-row-btn"><button onclick="deleteRow(this)" class="text-red-400 hover:text-red-300 font-bold text-xl px-1">×</button></td>
+                `;
+            } else if (tableId === 'table-panitia') {
+                newRowHTML = `
+                    <td class="text-center font-mono row-num font-bold">${rowCount}</td>
+                    <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" placeholder="Bidang..." onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                    <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" placeholder="Nama PIC..." onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                    <td class="text-center delete-row-btn"><button onclick="deleteRow(this)" class="text-red-400 hover:text-red-300 font-bold text-xl px-1">×</button></td>
+                `;
+            } else if (tableId === 'table-pekerjaan') {
+                newRowHTML = `
+                    <td class="text-center font-mono row-num font-bold">${rowCount}</td>
+                    <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" placeholder="Item Pekerjaan..." onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                    <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" placeholder="Nama Tukang..." onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                    <td class="text-center"><input type="number" inputmode="numeric" min="0" class="hud-input w-full text-center" value="0" onfocus="scrollToInput(this)" oninput="if(this.value<0)this.value=0; saveAllData();"></td>
+                    <td class="text-center delete-row-btn"><button onclick="deleteRow(this)" class="text-red-400 hover:text-red-300 font-bold text-xl px-1">×</button></td>
+                `;
+            } else if (tableId === 'table-informasi') {
+                newRowHTML = `
+                    <td class="text-center font-mono row-num font-bold">${rowCount}</td>
+                    <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" placeholder="Keterangan..." onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                    <td class="px-1"><input type="text" inputmode="text" class="hud-input w-full" placeholder="Catatan..." onfocus="scrollToInput(this)" oninput="saveAllData()"></td>
+                    <td class="text-center delete-row-btn"><button onclick="deleteRow(this)" class="text-red-400 hover:text-red-300 font-bold text-xl px-1">×</button></td>
+                `;
+            }
+
+            const newRow = tbody.insertRow();
+            newRow.innerHTML = newRowHTML;
+            if (tableId === 'table-orang') window.calculateTotals();
+            window.saveAllData();
+        }
+
+        window.deleteRow = function(btn) {
+            if (!isEditMode) return;
+            const row = btn.parentNode.parentNode;
+            const tableId = row.closest('table').id;
+            row.parentNode.removeChild(row);
+
+            const tbody = document.getElementById(tableId).getElementsByTagName('tbody')[0];
+            for (let i = 0; i < tbody.rows.length; i++) {
+                tbody.rows[i].cells[0].innerText = i + 1;
+            }
+
+            if (tableId === 'table-orang') window.calculateTotals();
+            window.saveAllData();
+        }
+
+        window.toggleEditorMode = function() {
+            const pin = "513513";
+            const btnMode = document.getElementById('btn-mode');
+
+            if (!isEditMode) {
+                const enteredPin = prompt("Masukkan Kode Admin untuk Akses Editor:");
+                if (enteredPin === pin) {
+                    isEditMode = true;
+                    document.body.classList.remove('view-mode');
+                    btnMode.innerHTML = `<span class="opacity-70 text-base">⚙️</span> Mode Edit (Aktif)`;
+                    btnMode.classList.add('border-cyan-400', 'bg-cyan-950/40');
+                } else if (enteredPin !== null) {
+                    alert("Kode PIN salah!");
+                }
+            } else {
+                isEditMode = false;
+                document.body.classList.add('view-mode');
+                btnMode.innerHTML = `<span class="opacity-70 text-base">👁️‍🗨️</span> Admin Editor`;
+                btnMode.classList.remove('border-cyan-400', 'bg-cyan-950/40');
+            }
+        }
+
+        // FUNGSI EXPORT EXCEL DENGAN RENTANG TANGGAL OTOMATIS (TGL 1 SAMPAI AKHIR BULAN)
+        window.exportExcel = function() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = now.getMonth(); 
+
+            const firstDayStr = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+            const lastDay = new Date(year, month + 1, 0).getDate();
+            const lastDayStr = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`;
+            const periodeText = `Periode: ${firstDayStr} s.d. ${lastDayStr}`;
+
+            const wb = XLSX.utils.book_new();
+            const tables = ['table-orang', 'table-panitia', 'table-pekerjaan', 'table-informasi'];
+            const sheetNames = ['Jml Orang MZAK', 'Panitia Jaga', 'Pekerjaan', 'Informasi'];
+
+            tables.forEach((tblId, index) => {
+                const tableElement = document.getElementById(tblId);
+                const cloneTable = tableElement.cloneNode(true);
+                
+                cloneTable.querySelectorAll('input').forEach(input => {
+                    const val = input.value;
+                    const span = document.createElement('span');
+                    span.textContent = !isNaN(val) && val.trim() !== '' ? Number(val) : val;
+                    input.parentNode.replaceChild(span, input);
+                });
+
+                cloneTable.querySelectorAll('tr').forEach(row => {
+                    const lastCell = row.cells[row.cells.length - 1];
+                    if (lastCell && (lastCell.classList.contains('delete-row-btn') || lastCell.classList.contains('delete-col-header'))) {
+                        row.deleteCell(row.cells.length - 1);
+                    }
+                });
+
+                const ws = XLSX.utils.table_to_sheet(cloneTable);
+                XLSX.utils.sheet_add_aoa(ws, [[periodeText]], { origin: "A1" });
+                
+                const range = XLSX.utils.decode_range(ws['!ref']);
+                range.s.r = 0; 
+                range.e.r += 2; 
+                ws['!ref'] = XLSX.utils.encode_range(range);
+
+                XLSX.utils.book_append_sheet(wb, ws, sheetNames[index]);
+            });
+
+            XLSX.writeFile(wb, `Laporan_MZAK_${firstDayStr}_s_d_${lastDayStr}.xlsx`);
+        }
+    </script>
+    <style>
+        /* SPASI BAWAH AGAR TIDAK TERTUTUP KEYBOARD HP DAN PERBESAR UKURAN TEKS UTAMA */
+        body {
+            padding-bottom: 350px !important;
+            font-size: 17px !important;
+        }
+
+        /* === PILIHAN TEMA PROFESIONAL === */
+
+        /* 1. Tema Neon Biru Orange */
+        body.theme-neon-orange { background-color: #030712; color: #94a3b8; }
+        body.theme-neon-orange .hud-card { background: rgba(13, 20, 36, 0.85); border: 1px solid rgba(6, 182, 212, 0.4); box-shadow: 0 0 15px rgba(249, 115, 22, 0.15); }
+        body.theme-neon-orange .hologram-title { background: linear-gradient(90deg, #f97316, #06b6d4, #facc15, #f97316); background-size: 300% auto; color: transparent; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: hologramScroll 6s linear infinite; }
+        body.theme-neon-orange .table-title { color: #f97316; }
+        body.theme-neon-orange th { color: #06b6d4 !important; }
+        body.theme-neon-orange .row-num { color: #f97316 !important; }
+
+        /* 2. Tema Klasik Terang */
+        body.theme-classic-light { background-color: #f1f5f9; color: #334155; }
+        body.theme-classic-light .hud-card { background: #ffffff; border: 2px solid transparent; background-image: linear-gradient(#ffffff, #ffffff), linear-gradient(90deg, #3b82f6, #06b6d4, #3b82f6); background-origin: border-box; background-clip: padding-box, border-box; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        body.theme-classic-light .hologram-title { background: linear-gradient(90deg, #1e40af, #0284c7, #1e40af); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        body.theme-classic-light .table-title { color: #1d4ed8; }
+        body.theme-classic-light .hud-input { background: #f8fafc !important; border-color: #cbd5e1 !important; color: #0f172a !important; }
+        body.theme-classic-light th { color: #2563eb !important; }
+        body.theme-classic-light .row-num { color: #2563eb !important; }
+        body.theme-classic-light .hud-header { background: #e2e8f0 !important; border-bottom: 2px solid #3b82f6; }
+
+        /* 3. Tema Google Colorful */
+        body.theme-google-colorful { background-color: #f8fafc; color: #475569; }
+        body.theme-google-colorful .hud-card { background: #ffffff; border: 2px solid transparent; background-image: linear-gradient(#ffffff, #ffffff), linear-gradient(90deg, #4285F4, #34A853, #FBBC05, #EA4335, #4285F4); background-origin: border-box; background-clip: padding-box, border-box; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); }
+        body.theme-google-colorful .hologram-title { background: linear-gradient(90deg, #4285F4, #EA4335, #FBBC05, #34A853, #4285F4); background-size: 300% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        body.theme-google-colorful .table-title { color: #1f2937; }
+        body.theme-google-colorful .hud-input { background: #f8fafc !important; border-color: #e2e8f0 !important; color: #1e293b !important; }
+        body.theme-google-colorful .row-num { color: #4285F4 !important; font-weight: bold; }
+        body.theme-google-colorful .hud-header { background: #ffffff !important; border-bottom: 2px solid #e2e8f0; }
+
+        /* 4. Tema Royal Executive Gold */
+        body.theme-executive-gold { background-color: #0f172a; color: #cbd5e1; }
+        body.theme-executive-gold .hud-card { background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(234, 179, 8, 0.4); box-shadow: 0 0 15px rgba(234, 179, 8, 0.1); }
+        body.theme-executive-gold .hologram-title { background: linear-gradient(90deg, #fde047, #ca8a04, #fde047); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        body.theme-executive-gold .table-title { color: #facc15; }
+        body.theme-executive-gold th { color: #eab308 !important; }
+        body.theme-executive-gold .row-num { color: #ca8a04 !important; }
+
+        /* 5. Tema Dark Gradient */
+        body.theme-dark-gradient { background-color: #09090b; color: #d4d4d8; }
+        body.theme-dark-gradient .hud-card {
+            background: rgba(18, 18, 24, 0.92);
+            border: 2px solid transparent;
+            background-image: linear-gradient(rgba(18, 18, 24, 0.92), rgba(18, 18, 24, 0.92)), linear-gradient(90deg, #9333ea, #3b82f6, #ef4444, #9333ea);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+            box-shadow: 0 0 20px rgba(147, 51, 234, 0.15);
+            animation: darkGradientRun 5s linear infinite;
+            background-size: 300% 300%;
+        }
+        @keyframes darkGradientRun {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        body.theme-dark-gradient .hologram-title {
+            background: linear-gradient(90deg, #c084fc, #60a5fa, #f87171, #c084fc);
+            background-size: 300% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: hologramScroll 6s linear infinite;
+        }
+        body.theme-dark-gradient .table-title { color: #e879f9; }
+        body.theme-dark-gradient .hud-input { background: #18181b !important; border-color: #3f3f46 !important; color: #f4f4f5 !important; }
+        body.theme-dark-gradient th { color: #60a5fa !important; }
+        body.theme-dark-gradient .row-num { color: #f87171 !important; font-weight: bold; }
+        body.theme-dark-gradient .hud-header { background: rgba(18, 18, 24, 0.95) !important; border-bottom: 1px solid rgba(147, 51, 234, 0.3); }
+
+        .hud-header { border-bottom: 1px solid rgba(6, 182, 212, 0.4); }
+        @keyframes hologramScroll { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
+        
+        .hud-input {
+            background: rgba(3, 7, 18, 0.6) !important;
+            border: 1px solid rgba(51, 65, 85, 0.8) !important;
+            color: inherit !important;
+            border-radius: 6px;
+            padding: 6px 10px !important;
+            height: 42px !important;
+            font-size: 17px !important;
+            transition: all 0.2s ease;
+        }
+        .hud-btn {
+            background: rgba(6, 182, 212, 0.15);
+            border: 1px solid rgba(6, 182, 212, 0.4);
+            color: inherit;
+            transition: all 0.2s;
+        }
+        .hud-btn:hover { background: rgba(6, 182, 212, 0.3); }
+        
+        table th { font-size: 14px !important; padding-top: 10px !important; padding-bottom: 10px !important; }
+        table td { font-size: 17px !important; padding-top: 10px !important; padding-bottom: 10px !important; }
+        
+        body.view-mode .hud-input {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            pointer-events: none;
+            padding: 0 !important;
+            height: auto !important;
+            font-size: 17px !important;
+        }
+        body.view-mode .add-row-btn, body.view-mode .delete-col-header, body.view-mode .delete-row-btn { display: none !important; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    </style>
+</head>
+<body class="min-h-screen p-3 flex flex-col gap-3 view-mode theme-dark-gradient">
+
+    <!-- Header / Navigasi HUD -->
+    <header class="hud-card hud-header p-4 flex flex-col justify-center items-center text-center gap-1.5 sticky top-3 z-50">
+        <div>
+            <p class="text-xs uppercase tracking-[0.2em] opacity-80 font-semibold">Papan Pengumuman</p>
+            <h1 class="text-2xl sm:text-4xl hologram-title tracking-tight font-extrabold">Pembangunan MZAK Hari Ini</h1>
+            <p id="datetime" class="text-sm font-mono mt-1 opacity-95 font-medium"></p>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-grow">
+
+        <!-- 1. Jumlah orang -->
+        <section class="hud-card p-4 flex flex-col">
+            <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-700/40">
+                <h2 class="uppercase text-sm sm:text-base tracking-wider table-title font-bold">1. Jumlah orang di lokasi MZAK Hari Ini</h2>
+                <button onclick="addRow('table-orang')" class="hud-btn w-9 h-9 rounded flex items-center justify-center font-bold text-xl add-row-btn">+</button>
+            </div>
+            <div class="overflow-x-auto flex-grow flex flex-col justify-between">
+                <table id="table-orang" class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-700/40 uppercase">
+                            <th class="w-10 text-center font-bold">No</th>
+                            <th class="px-2 font-bold">Unsur</th>
+                            <th class="w-20 text-center font-bold">Pagi</th>
+                            <th class="w-20 text-center font-bold">Siang</th>
+                            <th class="w-20 text-center font-bold">Sore</th>
+                            <th class="w-8 text-center delete-col-header font-bold">#</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-medium"></tbody>
+                </table>
+                <div class="w-full pt-3 mt-2 border-t border-slate-700/40 font-bold">
+                    <table class="w-full border-collapse">
+                        <tr>
+                            <td class="w-10"></td>
+                            <td class="text-right pr-3 uppercase tracking-wider px-2 font-bold text-base">Total :</td>
+                            <td id="total-pagi" class="w-20 text-center font-mono text-lg font-bold">0</td>
+                            <td id="total-siang" class="w-20 text-center font-mono text-lg font-bold">0</td>
+                            <td id="total-sore" class="w-20 text-center font-mono text-lg font-bold">0</td>
+                            <td class="w-8 delete-col-header"></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. Hubungi Panitia -->
+        <section class="hud-card p-4 flex flex-col">
+            <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-700/40">
+                <h2 class="uppercase text-sm sm:text-base tracking-wider table-title font-bold">2. Hubungi Panitia di Lokasi MZAK</h2>
+                <button onclick="addRow('table-panitia')" class="hud-btn w-9 h-9 rounded flex items-center justify-center font-bold text-xl add-row-btn">+</button>
+            </div>
+            <div class="overflow-x-auto flex-grow">
+                <table id="table-panitia" class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-700/40 uppercase">
+                            <th class="w-10 text-center font-bold">No</th>
+                            <th class="px-2 font-bold">Bidang</th>
+                            <th class="px-2 font-bold">PIC</th>
+                            <th class="w-8 text-center delete-col-header font-bold">#</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-medium"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 3. Daftar Pekerjaan -->
+        <section class="hud-card p-4 flex flex-col">
+            <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-700/40">
+                <h2 class="uppercase text-sm sm:text-base tracking-wider table-title font-bold">3. Daftar Pekerjaan Hari Ini</h2>
+                <button onclick="addRow('table-pekerjaan')" class="hud-btn w-9 h-9 rounded flex items-center justify-center font-bold text-xl add-row-btn">+</button>
+            </div>
+            <div class="overflow-x-auto flex-grow">
+                <table id="table-pekerjaan" class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-700/40 uppercase">
+                            <th class="w-10 text-center font-bold">No</th>
+                            <th class="px-2 font-bold">Item Pekerjaan</th>
+                            <th class="px-2 font-bold">Nama Tukang</th>
+                            <th class="w-24 text-center font-bold">Helper</th>
+                            <th class="w-8 text-center delete-col-header font-bold">#</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-medium"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 4. Informasi -->
+        <section class="hud-card p-4 flex flex-col">
+            <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-700/40">
+                <h2 class="uppercase text-sm sm:text-base tracking-wider table-title font-bold">4. Informasi</h2>
+                <button onclick="addRow('table-informasi')" class="hud-btn w-9 h-9 rounded flex items-center justify-center font-bold text-xl add-row-btn">+</button>
+            </div>
+            <div class="overflow-x-auto flex-grow">
+                <table id="table-informasi" class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-700/40 uppercase">
+                            <th class="w-10 text-center font-bold">No</th>
+                            <th class="px-2 font-bold">Keterangan / Informasi</th>
+                            <th class="px-2 font-bold">Catatan</th>
+                            <th class="w-8 text-center delete-col-header font-bold">#</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-medium"></tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Tombol Aksi Bawah -->
+    <div class="hud-card p-4 flex flex-wrap justify-center items-center gap-3">
+        <button id="btn-mode" onclick="toggleEditorMode()" class="hud-btn px-5 py-2.5 rounded-lg text-sm sm:text-base font-semibold tracking-wide flex items-center gap-2">
+            <span class="opacity-70 text-base">👁️‍🗨️</span> Admin Editor
+        </button>
+        <button onclick="exportExcel()" class="hud-btn px-5 py-2.5 rounded-lg text-sm sm:text-base font-semibold tracking-wide flex items-center gap-2">
+            <span class="opacity-70 text-base">📑</span> Export Excel
+        </button>
+    </div>
+
+    <!-- PANEL PEMILIH TEMA -->
+    <div class="hud-card p-3 flex flex-wrap justify-center items-center gap-2 text-xs sm:text-sm">
+        <span class="font-bold opacity-85 uppercase tracking-wider mr-1">Pilih Tema:</span>
+        <button onclick="setTheme('theme-neon-orange')" class="px-3 py-1.5 rounded border border-orange-500/50 hover:bg-orange-500 hover:text-black transition font-semibold">Orange Neon</button>
+        <button onclick="setTheme('theme-classic-light')" class="px-3 py-1.5 rounded border border-blue-500/50 hover:bg-blue-500 hover:text-white transition font-semibold">Klasik Terang</button>
+        <button onclick="setTheme('theme-google-colorful')" class="px-3 py-1.5 rounded border border-blue-400/50 hover:bg-blue-500 hover:text-white transition font-semibold">Google Colorful</button>
+        <button onclick="setTheme('theme-executive-gold')" class="px-3 py-1.5 rounded border border-yellow-500/50 hover:bg-yellow-500 hover:text-black transition font-semibold">Gold Eksekutif</button>
+        <button onclick="setTheme('theme-dark-gradient')" class="px-3 py-1.5 rounded border border-purple-500/50 hover:bg-purple-600 hover:text-white transition font-semibold">Dark Gradient</button>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs opacity-70 font-mono py-1">
+        MZAK Command Center System • PIN: 513513
+    </footer>
+</body>
+</html>
